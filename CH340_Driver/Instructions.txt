@@ -1,0 +1,3 @@
+Double-click the file ending in ".EXE" and click "Install."
+
+If the installation fails, it may be because the software was already installed or due to an issue with your computer; try uninstalling it first, then attempt the installation again.
