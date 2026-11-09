@@ -1,0 +1,70 @@
+name: Three-way firmware comparison (original Linux Windows)
+on:
+  push:
+    branches:
+      - audit/firmware-provenance-20261109
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  firmware-three-way:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact original source and firmware
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.1 (Linux)
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core list
+
+      - name: Install same pinned Arduino libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "FlixPeriph@1.10.3" "MAVLink@2.0.33"
+          arduino-cli lib list
+
+      - name: Build Linux ESP32 Dev Module binary
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir "$GITHUB_WORKSPACE/build-linux" --warnings default src/XW-Drone
+          find build-linux -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+
+      - name: Download successful Windows ESP32 artifact (run 42572007871)
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-esp32-3.3.1-build-and-audit
+          repository: duy12i1i7/tinyDrone
+          run-id: 42572007871
+          github-token: ${{ github.token }}
+          path: build-windows
+
+      - name: Check downloaded Windows artifacts
+        run: |
+          find build-windows -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
+          test -f build-windows/XW-Drone.ino.bin
+          test -f build-windows/XW-Drone.ino.merged.bin
+
+      - name: Compare reference Linux and Windows image binaries
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python3 .github/scripts/compare_three_firmwares.py
+
+      - name: Publish comparison reports and Linux binary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-three-way-reports
+          path: |
+            comparison/*.json
+            comparison/*.md
+            build-linux/*.bin
+          retention-days: 14
+          if-no-files-found: warn
