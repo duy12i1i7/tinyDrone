@@ -91,3 +91,10 @@ jobs:
           else
             echo "Audit could not execute because compilation did not generate a binary"
           fi
+
+      - name: Compare all retained source literals and unaligned 48-byte instruction/data fingerprints
+        if: ${{ always() }}
+        run: |
+          if [ -f "build/XW-Drone.ino.bin" ]; then
+            python3 .github/scripts/firmware_source_strings_audit.py
+          fi
