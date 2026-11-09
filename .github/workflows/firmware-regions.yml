@@ -1,0 +1,52 @@
+name: Compare original Linux Windows flash regions
+on:
+  push:
+    branches:
+      - audit/firmware-provenance-20261109
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  flash-region-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout original merged firmware
+        uses: actions/checkout@v4
+
+      - name: Fetch previously verified Linux build artifact
+        uses: actions/download-artifact@v4
+        with:
+          repository: duy12i1i7/tinyDrone
+          run-id: 42572990450
+          name: firmware-three-way-reports
+          github-token: ${{ github.token }}
+          path: .
+
+      - name: Fetch previously verified Windows build artifact
+        uses: actions/download-artifact@v4
+        with:
+          repository: duy12i1i7/tinyDrone
+          run-id: 42572007871
+          name: windows-esp32-3.3.1-build-and-audit
+          github-token: ${{ github.token }}
+          path: build-windows
+
+      - name: Verify all three merged files are present
+        run: |
+          ls -lh Firmware/XW-Drone.ino.merged.bin build-linux/XW-Drone.ino.merged.bin build-windows/XW-Drone.ino.merged.bin
+
+      - name: Compare per-region contents and classify differences
+        run: python3 .github/scripts/compare_flash_regions.py
+
+      - name: Upload flash layout report
+        uses: actions/upload-artifact@v4
+        with:
+          name: flash-region-three-way
+          path: |
+            comparison/flash-region-analysis.md
+            comparison/flash-region-analysis.json
+          retention-days: 14
