@@ -1,0 +1,80 @@
+name: Verify firmware built on Windows
+on:
+  push:
+    branches:
+      - audit/firmware-provenance-20261109
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-firmware-audit:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout exact source and bundled firmware
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install official Espressif ESP32 core version 3.3.1
+        run: |
+          arduino-cli version
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core list
+
+      - name: Install exact libraries used in Linux comparison
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "FlixPeriph@1.10.3" "MAVLink@2.0.33"
+          arduino-cli lib list
+
+      - name: Compile the unchanged source on Windows ESP32 Dev Module
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir "$env:GITHUB_WORKSPACE/build" --warnings default src/XW-Drone
+          Get-ChildItem build -Filter *.bin | Select-Object Name,Length | Format-Table
+
+      - name: Compare original firmware and Windows build
+        run: |
+          @'
+          from pathlib import Path
+          import hashlib
+          r = Path("Firmware/XW-Drone.ino.merged.bin").read_bytes()
+          print("REFERENCE_SHA256=" + hashlib.sha256(r).hexdigest())
+          print("REFERENCE_SIZE=" + str(len(r)))
+          for path in sorted(Path("build").glob("*.bin")):
+              b = path.read_bytes()
+              print("WINDOWS_BUILD_BIN=" + path.name)
+              print("WINDOWS_BUILD_SHA256=" + hashlib.sha256(b).hexdigest())
+              print("WINDOWS_BUILD_SIZE=" + str(len(b)))
+              if "merged" in path.name:
+                  print("FULL_BINARY_MATCH=" + str(b == r))
+          app = Path("build/XW-Drone.ino.bin").read_bytes()
+          reference_app_slice = r[0x10000:0x10000+len(app)]
+          print("APP_OFFSET_0x10000_EXACT_MATCH=" + str(app == reference_app_slice))
+          if app != reference_app_slice:
+              diff = next((i for i,(x,y) in enumerate(zip(app,reference_app_slice)) if x!=y),None)
+              print("APP_FIRST_DIFFERING_BYTE=" + str(diff))
+          '@ | python -
+
+      - name: Compare ESP image metadata and feature fingerprints
+        run: python .github/scripts/firmware_static_audit.py
+
+      - name: Compare retained source literals and code/data fingerprints
+        run: python .github/scripts/firmware_source_strings_audit.py
+
+      - name: Preserve reproducibility evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-esp32-3.3.1-build-and-audit
+          path: |
+            build/*.bin
+          if-no-files-found: warn
+          retention-days: 7
