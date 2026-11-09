@@ -22,7 +22,7 @@ import urllib.request
 INDEX_URL = "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
 TARGET_CORE = "3.3.1"
 HOST = "x86_64-mingw32"
-REQUIRED_TOOLS = {"esp32-arduino-libs", "esp-x32", "esptool_py", "dfu-util"}
+REQUIRED_TOOLS = {"esp32-arduino-libs", "esp-x32", "esptool_py"}
 UA = "tinyDrone-firmware-audit/2026 GitHub-Actions"
 LOCALAPPDATA = pathlib.Path(os.environ["LOCALAPPDATA"])
 ARDUINO = LOCALAPPDATA / "Arduino15"
@@ -153,9 +153,6 @@ def main():
         if len(matches) != 1:
             raise RuntimeError(f"Missing tool: {dep}")
         systems = [s for s in matches[0]["systems"] if s["host"] == HOST]
-        if not systems and dep["name"] == "dfu-util":
-            # Official manifest defines dfu-util for i686 Windows only.
-            systems = [s for s in matches[0]["systems"] if s["host"] == "i686-mingw32"]
         if len(systems) != 1:
             raise RuntimeError(f"No Windows host archive for {dep}: {[s['host'] for s in matches[0]['systems']]}")
         archives.append(systems[0])
