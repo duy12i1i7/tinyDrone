@@ -11,6 +11,8 @@ permissions:
 jobs:
   windows-firmware-audit:
     runs-on: windows-2022
+    env:
+      PYTHONIOENCODING: utf-8
     timeout-minutes: 45
     defaults:
       run:
