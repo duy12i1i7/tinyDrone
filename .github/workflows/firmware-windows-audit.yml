@@ -27,6 +27,20 @@ jobs:
           arduino-cli version
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           if ($LASTEXITCODE -ne 0) { throw "Cannot update ESP32 index" }
+          # Only the two filesystem-image maker tools are excluded from this
+          # diagnostic core-install manifest. The official core v3.3.1 and
+          # every compiler/runtime tool stay at their exact vendor versions.
+          # The drone sketch uses neither mkspiffs nor mklittlefs.
+          $indexFile = Join-Path $env:LOCALAPPDATA "Arduino15/package_esp32_index.json"
+          if (-not (Test-Path $indexFile)) { throw "ESP32 package index missing: $indexFile" }
+          $index = Get-Content $indexFile -Raw | ConvertFrom-Json
+          $vendor = @($index.packages | Where-Object { $_.name -eq "esp32" })[0]
+          $platform = @($vendor.platforms | Where-Object { $_.version -eq "3.3.1" })[0]
+          if (-not $platform) { throw "ESP32 3.3.1 platform not found in index" }
+          $before = @($platform.toolsDependencies).Count
+          $platform.toolsDependencies = @($platform.toolsDependencies | Where-Object { $_.name -notin @("mkspiffs", "mklittlefs") })
+          Write-Host "ESP32 3.3.1 tool dependencies: $before -> $(@($platform.toolsDependencies).Count)"
+          $index | ConvertTo-Json -Depth 100 | Set-Content -Encoding utf8 $indexFile
           $installed = $false
           for ($attempt = 1; $attempt -le 6; $attempt++) {
             Write-Host "ESP32 core install attempt $attempt of 6"
