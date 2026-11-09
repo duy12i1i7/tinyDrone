@@ -22,12 +22,23 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Install official Espressif ESP32 core version 3.3.1
+      - name: Install official Espressif ESP32 core version 3.3.1 (retry on upstream 504)
         run: |
           arduino-cli version
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          if ($LASTEXITCODE -ne 0) { throw "Cannot update ESP32 index" }
+          $installed = $false
+          for ($attempt = 1; $attempt -le 6; $attempt++) {
+            Write-Host "ESP32 core install attempt $attempt of 6"
+            arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+            if ($LASTEXITCODE -eq 0) {
+              $installed = $true
+              break
+            }
+            if ($attempt -lt 6) { Start-Sleep -Seconds (10 * $attempt) }
+          }
           arduino-cli core list
+          if (-not $installed) { throw "ESP32 core installation failed despite retries (upstream download error)" }
 
       - name: Install exact libraries used in Linux comparison
         run: |
@@ -38,6 +49,7 @@ jobs:
       - name: Compile the unchanged source on Windows ESP32 Dev Module
         run: |
           arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir "$env:GITHUB_WORKSPACE/build" --warnings default src/XW-Drone
+          if ($LASTEXITCODE -ne 0) { throw "Arduino build failed" }
           Get-ChildItem build -Filter *.bin | Select-Object Name,Length | Format-Table
 
       - name: Compare original firmware and Windows build
