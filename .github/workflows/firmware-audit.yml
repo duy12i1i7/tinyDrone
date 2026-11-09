@@ -1,0 +1,100 @@
+name: Verify firmware against source
+on:
+  push:
+    branches:
+      - audit/firmware-provenance-20261109
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source and firmware
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.1
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core list
+
+      - name: Install pinned drone dependencies
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "FlixPeriph@1.10.3" "MAVLink@2.0.33"
+          arduino-cli lib list
+
+      - name: Compile the original ESP32 sketch
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir "$GITHUB_WORKSPACE/build" --warnings default src/XW-Drone
+          find build -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+
+      - name: Compare both full merged image and application segment
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          original = Path("Firmware/XW-Drone.ino.merged.bin")
+          build = Path("build")
+          output_files = sorted(build.glob("*.bin"))
+          print("Reference file:", original)
+          print("Reference size:", original.stat().st_size)
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          ref = original.read_bytes()
+          print("Reference SHA256:", sha(ref))
+
+          for p in output_files:
+              b = p.read_bytes()
+              print(f"Built file: {p.name} size={len(b)} sha256={sha(b)}")
+              if len(b) == len(ref):
+                  print(f"  FULL_IMAGE_MATCH={b == ref}")
+
+          apps = [p for p in output_files if p.name == "XW-Drone.ino.bin"]
+          if len(apps) != 1:
+              print("RESULT: INCONCLUSIVE: no compiled app binary found")
+              raise SystemExit(3)
+          app = apps[0].read_bytes()
+          print("Compiled app SHA256:", sha(app))
+          matches = []
+          for offset in (0x10000, 0x20000):
+              sub = ref[offset:offset + len(app)]
+              same = (sub == app)
+              print(f"APP_OFFSET=0x{offset:x} APP_MATCH={same} region_sha256={sha(sub)}")
+              if len(sub) == len(app) and not same:
+                  first = next((i for i, (a, b) in enumerate(zip(sub, app)) if a != b), None)
+                  print(f"  first_difference_app_offset={first}")
+              if same:
+                  matches.append(offset)
+          if matches:
+              print(f"RESULT: APP_MATCH at offsets {[hex(x) for x in matches]}")
+          else:
+              print("RESULT: APP_MISMATCH under pinned toolchain and dependencies")
+              raise SystemExit(2)
+          PY
+
+      - name: Static feature equivalence audit (diagnostic, never asserts runtime equivalence)
+        if: ${{ always() }}
+        run: |
+          if [ -f "build/XW-Drone.ino.bin" ]; then
+            python3 .github/scripts/firmware_static_audit.py
+          else
+            echo "Audit could not execute because compilation did not generate a binary"
+          fi
+
+      - name: Compare all retained source literals and unaligned 48-byte instruction/data fingerprints
+        if: ${{ always() }}
+        run: |
+          if [ -f "build/XW-Drone.ino.bin" ]; then
+            python3 .github/scripts/firmware_source_strings_audit.py
+          fi
