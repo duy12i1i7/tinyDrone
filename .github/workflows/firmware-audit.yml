@@ -82,3 +82,12 @@ jobs:
               print("RESULT: APP_MISMATCH under pinned toolchain and dependencies")
               raise SystemExit(2)
           PY
+
+      - name: Static feature equivalence audit (diagnostic, never asserts runtime equivalence)
+        if: ${{ always() }}
+        run: |
+          if [ -f "build/XW-Drone.ino.bin" ]; then
+            python3 .github/scripts/firmware_static_audit.py
+          else
+            echo "Audit could not execute because compilation did not generate a binary"
+          fi
