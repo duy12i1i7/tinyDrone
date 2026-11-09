@@ -28,9 +28,10 @@ jobs:
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           if ($LASTEXITCODE -ne 0) { throw "Cannot update ESP32 index" }
           # Only the two filesystem-image maker tools are excluded from this
-          # diagnostic core-install manifest. The official core v3.3.1 and
-          # every compiler/runtime tool stay at their exact vendor versions.
-          # The drone sketch uses neither mkspiffs nor mklittlefs.
+          # diagnostic core-install manifest. The official core v3.3.1 and its Xtensa compiler/runtime tools
+          # remain at exact vendor versions; only optional SPIFFS/LittleFS,
+          # RISC-V, GDB and OpenOCD tools not used by ESP32 Dev Module builds
+          # are omitted to bypass failing download mirrors.
           $indexFile = Join-Path $env:LOCALAPPDATA "Arduino15/package_esp32_index.json"
           if (-not (Test-Path $indexFile)) { throw "ESP32 package index missing: $indexFile" }
           $index = Get-Content $indexFile -Raw | ConvertFrom-Json
@@ -38,7 +39,7 @@ jobs:
           $platform = @($vendor.platforms | Where-Object { $_.version -eq "3.3.1" })[0]
           if (-not $platform) { throw "ESP32 3.3.1 platform not found in index" }
           $before = @($platform.toolsDependencies).Count
-          $platform.toolsDependencies = @($platform.toolsDependencies | Where-Object { $_.name -notin @("mkspiffs", "mklittlefs") })
+          $platform.toolsDependencies = @($platform.toolsDependencies | Where-Object { $_.name -notin @("mkspiffs", "mklittlefs", "esp-rv32", "riscv32-esp-elf-gdb", "xtensa-esp-elf-gdb", "openocd-esp32") })
           Write-Host "ESP32 3.3.1 tool dependencies: $before -> $(@($platform.toolsDependencies).Count)"
           $index | ConvertTo-Json -Depth 100 | Set-Content -Encoding utf8 $indexFile
           $installed = $false
