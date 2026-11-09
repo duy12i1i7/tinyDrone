@@ -22,38 +22,40 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Install official Espressif ESP32 core version 3.3.1 (retry on upstream 504)
+      - name: Restore SHA-256 verified Espressif archives cache
+        id: cached
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/AppData/Local/Arduino15/staging/packages
+          key: windows-esp32-3.3.1-official-archives-v2-${{ github.run_id }}
+          restore-keys: |
+            windows-esp32-3.3.1-official-archives-v2-
+
+      - name: Download official board index
         run: |
-          arduino-cli version
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot update ESP32 index" }
-          # Only the two filesystem-image maker tools are excluded from this
-          # diagnostic core-install manifest. The official core v3.3.1 and its Xtensa compiler/runtime tools
-          # remain at exact vendor versions; only optional SPIFFS/LittleFS,
-          # RISC-V, GDB and OpenOCD tools not used by ESP32 Dev Module builds
-          # are omitted to bypass failing download mirrors.
-          $indexFile = Join-Path $env:LOCALAPPDATA "Arduino15/package_esp32_index.json"
-          if (-not (Test-Path $indexFile)) { throw "ESP32 package index missing: $indexFile" }
-          $index = Get-Content $indexFile -Raw | ConvertFrom-Json
-          $vendor = @($index.packages | Where-Object { $_.name -eq "esp32" })[0]
-          $platform = @($vendor.platforms | Where-Object { $_.version -eq "3.3.1" })[0]
-          if (-not $platform) { throw "ESP32 3.3.1 platform not found in index" }
-          $before = @($platform.toolsDependencies).Count
-          $platform.toolsDependencies = @($platform.toolsDependencies | Where-Object { $_.name -notin @("mkspiffs", "mklittlefs", "esp-rv32", "riscv32-esp-elf-gdb", "xtensa-esp-elf-gdb", "openocd-esp32") })
-          Write-Host "ESP32 3.3.1 tool dependencies: $before -> $(@($platform.toolsDependencies).Count)"
-          $index | ConvertTo-Json -Depth 100 | Set-Content -Encoding utf8 $indexFile
-          $installed = $false
-          for ($attempt = 1; $attempt -le 6; $attempt++) {
-            Write-Host "ESP32 core install attempt $attempt of 6"
-            arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-            if ($LASTEXITCODE -eq 0) {
-              $installed = $true
-              break
-            }
-            if ($attempt -lt 6) { Start-Sleep -Seconds (10 * $attempt) }
-          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download official Espressif index" }
+
+      - name: Probe HTTP redirects and pre-download vendor archives with SHA-256 verification
+        id: prime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python .github/scripts/prime_windows_arduino_cache.py
+          if ($LASTEXITCODE -ne 0) { throw "Unable to retrieve verified vendor archives" }
+
+      - name: Save verified vendor archive cache
+        if: steps.prime.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Local/Arduino15/staging/packages
+          key: windows-esp32-3.3.1-official-archives-v2-${{ github.run_id }}
+
+      - name: Install Espressif ESP32 core 3.3.1 from verified staged packages
+        run: |
+          arduino-cli core install esp32:esp32@3.3.1 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install ESP32 core 3.3.1 from verified archives" }
           arduino-cli core list
-          if (-not $installed) { throw "ESP32 core installation failed despite retries (upstream download error)" }
 
       - name: Install exact libraries used in Linux comparison
         run: |
